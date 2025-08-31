@@ -6,44 +6,54 @@ import {uploadOnCloudinary} from "../utils/cloudinary.js"
 import {ApiResponse} from "../utils/ApiResponse.js"
 
 
+const generateAccessTokenAndRefreshTokens =async(userId)=>{
+  try {
+    const user = await User.findById(userId)
+    const accessToken = user.generateAccessToken()
+    const refreshToken = user.generateRefreshToken()
+    user.refreshToken = refreshToken
+    await user.save({validateBeforeSave: false})
+    return {accessToken, refreshToken}
+  } catch (error) {
+    throw new ApiError(500, "somthing went wrong while genrating referesh and access token")
+  }
+}
+
+//register user methods
 const registerUser = asyncHandler(async (req, res) => {
   // Registration logic here
-  /*
-  get user details from frontend
-  validation - not empty
-  check if user already exists: username , email
-  check for image,check for avatar
-  create user object - create entry in db
-  remove password and refresh token field from response
-  check for user creation
-  return res
-  */
-
   const { fullname, email, password, username } = req.body
-  console.log("fullName :",fullname);
+ // console.log("fullName :",fullname);
   if (
     [fullname,email,username,password].some((field) => field?.trim() === "")
   ) {
    throw apiError( 400, "All fields are required");
   }
-  User.findOne({
+  await User.findOne({
     $or: [{ email }, { username }]
   }).then((existingUser) => {
     if (existingUser) {
      throw new ApiError(400, "User already exists");
   }})
-  console.log(req.files);
+  //  console.log(req);
   const avatarLocalPath = req.files?.avatar[0]?.path
-  const coverImageLocalPath = req.files?.coverImage[0]?.path
+  let coverImageLocalPath;
+  if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.lengh > 0){
+    coverImageLocalPath = req.files.coverImage[0].path 
+  }
+  console.log("req.files",req.files);
+  
   if(!avatarLocalPath)throw new ApiError(400, "avatar file is required")
   const avatar = await uploadOnCloudinary(avatarLocalPath)
   const coverImage = uploadOnCloudinary(coverImageLocalPath)
   if (!avatar) {throw new ApiError(400, "avatar file is required")}
+  console.log("cloudnary", avatar,);
+  
    // Create user object and save to database
   const user = await User.create({
     fullname,
-    avatar:avatar.url,
-    coverImage:coverImage?.url || "",
+    avatar:avatar,
+    coverImage: coverImage?.url || "",
     email,
     password,
     username:username.toLowerCase()
@@ -61,4 +71,67 @@ const registerUser = asyncHandler(async (req, res) => {
 
 })
 
-export { registerUser }
+//loggedin user methods
+const loginUser = asyncHandler(async (req, res) => {
+  const {email, username, password} = req.body
+  if (!username || !email) {
+    throw new ApiError(400, "username or email is required")
+  }
+const user = await User.findOne({
+    $or: [{username},{email}]
+  })
+  if (!user) {
+    throw new ApiError(404, "user dose not exist")
+  }
+  const passwordValid = await user.isPasswordCorrect(password)
+  if (!passwordValid) {
+    throw new ApiError(401, "invalid user credentials")
+  }
+  const {accessToken, refreshToken} =  await generateAccessTokenAndRefreshTokens(user._id)
+
+  const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+
+  const options = {
+    httpOnlY: true,
+    secure: true
+  }
+
+  return res
+  .status(200)
+  .cookie("accessToken" , accessToken, options)
+  .cookie("refreshToken", refreshToken, options)
+  .json(
+    new ApiResponse(
+      200,
+      {
+        user: loggedInUser, accessToken, refreshToken
+      },
+      "user logged in successfully"
+    )
+  )
+
+
+})
+
+// logout user methods
+const logoutUser = asyncHandler(async(req, res) => {
+  const userId = req.user._id
+  await User.findByIdAndUpdate(userId, {$set:{ refreshToken: undefined }},{
+    new: true
+  })
+  const options = {
+    httpOnly: true,
+    secure: true
+  }
+  return res
+  .status(200)
+  .clearCookie("accessToken", options)
+  .clearCookie("refreshToken", options)
+  .json(new ApiResponse(200, null, "user logged out successfully"))
+})
+export { 
+  registerUser, 
+  loginUser,
+  logoutUser
+
+}

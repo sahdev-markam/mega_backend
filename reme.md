@@ -47,5 +47,6 @@ let arr = {
   check for user creation
   return res
   */
-
+// the command to generating random string for jwt secret 
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
