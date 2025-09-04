@@ -44,14 +44,17 @@ const userSchema = new Schema({
     }
   ],
   refreshToken:{
-    type: String
-
+    type: String,
   },
 },{timestamps: true})
 
 userSchema.pre("seve",async function (next) {
   if(!this.isModified("password")) return next()
-  this.password = bcrypt.hash(this.password, 10)
+  const salt = await bcrypt.genSalt(8);
+  const hash = await bcrypt.hash(this.Password, salt);
+  console.log("hash of password", hash);
+  
+  this.password = hash
   next()
   return this.password
 })
